@@ -1,0 +1,322 @@
+---
+title: 'STOR 455 Homework #5'
+subtitle: 40 points - Due 10/22 at 11:59pm
+geometry: margin = 2.25cm
+output:
+  pdf_document: default
+---
+
+```{r}
+library(tidyverse)
+library(Stat2Data)
+library(car)
+
+hw3data <- read_csv("C:/Users/Adrian Roman/Desktop/AmesTrain15/AmesTrain15.csv")
+holdoutdata <- read_csv("C:/Users/Adrian Roman/Desktop/AmesTest15/AmesTest15.csv")
+grp20data <- read_csv("C:/Users/Adrian Roman/Desktop/AmesTrain20/AmesTrain20.csv")
+testgrp20data <- read_csv("C:/Users/Adrian Roman/Desktop/AmesTest20/AmesTest20.csv")
+
+grp15datanumeric <-hw3data[sapply(hw3data, is.numeric)] 
+
+mod1 <- lm(Price ~ LotFrontage + LotArea + Quality + Condition + 
+    YearBuilt + YearRemodel + BasementFinSF + BasementSF + FirstSF + 
+    SecondSF + Bedroom + TotalRooms + Fireplaces + GarageSF + 
+    OpenPorchSF + EnclosedPorchSF + ScreenPorchSF, data = grp15datanumeric)
+```
+
+
+__Directions:__ This is a direct continuation of Homework 3, and picks up right where it left off (after Part 6).  For parts 7 and 10 you should work together, but these parts must be __submitted individually__ by each group member. For parts 8 and 9, you must have only __one submission per group__. There will be separate places on Gradescope to submit the individual vs group work. __Group participation will be directly assessed as part of this assignment.__  Part 11 should be submitted as part of the individual submission, and will be used to verify that all group members contributed meaningfully to the assignment.  To receive full credit on the group portion of the assignment, you must receive an average group work score of 15 out of 20.
+
+__Situation:__ Can we predict the selling price of a house in Ames, Iowa based on recorded features of the house? That is your task for this assignment. Each team will get a dataset with information on forty potential predictors and the selling price (in $1,000’s) for a sample of homes. The data sets for your group are AmesTrain??.csv and AmesTest??.csv (where ?? corresponds to your group number) A separate file identifies the variables in the Ames Housing data and explains some of the coding.
+
+#### Part 7. Cross-validation: ####
+In some situations, a model might fit the peculiarities of a specific sample of data well, but not reflect structure that is really present in the population. A good test for how your model might work on "real" house prices can be simulated by seeing how well your fitted model does at predicting prices that were NOT in your original sample. This is why we reserved an additional 200 cases as a holdout sample in AmesTest??.csv. Use the group number and AmesTest??.csv corresponding to your group number for homework #3. Import your holdout test data and 
+
+* Compute the predicted Price for each of the cases in the holdout test sample, using your model resulting from the initial fit and residual analysis in parts 1 through 3 of Homework #3. 
+
+```{r}
+holdoutdata$Predicted_Price <- predict(mod1, newdata = holdoutdata)
+
+holdoutdata$Predicted_Price
+```
+
+
+* Compute the residuals for the 200 holdout cases.
+
+```{r}
+holdoutresids <- holdoutdata$Price - holdoutdata$Predicted_Price
+holdoutresids
+```
+
+
+* Compute the mean and standard deviation of these residuals. Are they close to what you expect from the training model?
+
+```{r}
+mean(holdoutresids)
+sd(holdoutresids)
+
+summary(mod1)
+```
+
+The holdout residuals have mean of essentially 0, indicating no systematic bias. Their SD is 22.77, compared to the training model’s residual 23.68. The test error is very close to training and even slightly smaller, suggesting good generalization and a holdout split that may be a bit “easier” than the training set.
+
+* Construct a plot of the residuals to determine if they are normally distributed. Is this plot what you expect to see considering the training model?
+
+```{r}
+hist(holdoutresids, breaks = 20)
+
+qqnorm(holdoutresids)
+qqline(holdoutresids)
+```
+
+The QQ plot shows residuals that are approximately normal in the center with heavier tails, especially on the positive side, indicating a few outliers. This is broadly consistent with the training model, as the holdout residual spread (22.77) is very close to the training (23.68), suggesting similar error behavior with some tail deviations.
+
+* Are any holdout cases especially poorly predicted by the training model? If so, identify by the row number(s) in the holdout data. Why might these cases be poorly predicted?
+
+```{r}
+poor_predictions <- order(abs(holdoutresids), decreasing = TRUE)[1:5]
+poor_predictions
+
+holdoutdata[poor_predictions,]
+mean(holdoutdata$Price)
+```
+Across the five flagged cases, the large residuals make sense because several homes sit in the tails of key predictors or have structural or omitted effects the model does not capture. Order 1539 has LotFrontage equal to zero plus a corner lot and large porch areas, which usually call for a zero frontage indicator and explicit porch terms. Orders 368, 2098, and 1765 are upper tail houses with very large floor area, three car garages, high Quality or Condition, and finished GLQ basements. Linear main effects can understate premiums in that region unless we allow nonlinearity or interactions such as Quality by size or Baths by size. Order 2621 sold much higher than predicted despite modest features, which suggests a location or neighborhood premium or niche style demand that is not in the predictors. Overall these outliers likely reflect omitted location, extreme sizes and amenities, structural zeros, and missing interactions or functional form that the current log model does not fully encode.
+
+* Compute the correlation between the predicted values and actual prices for the holdout sample. This is known as the cross-validation correlation. We don’t expect the training model to do better at predicting values different from those that were used to build it (as reflected in the original $R^{2}$), but an effective model shouldn’t do a lot worse at predicting the holdout values. Square the cross-validation correlation to get an $R^{2}$ value and subtract it from the original multiple $R^{2}$ of the training sample. This is known as the shrinkage. We won’t have specific rules about how little the shrinkage should be, but give an opinion on whether the shrinkage looks OK to you or too large in your situation.
+
+```{r}
+cvc <- cor(holdoutdata$Price, holdoutdata$Predicted_Price)
+cvc_Rsq <- (cvc)^2
+cvc_Rsq 
+
+summ<- summary(mod1)
+originalRsq <- summ$r.squared
+
+shrinkage <- originalRsq - cvc_Rsq
+shrinkage
+```
+
+The cross-validation correlation on the holdout set gives rcv^2=0.8803. The training multiple r^2is therefore about 0.8803+0.0110=0.8913, so the shrinkage is 0.0110 (around 1.1 percentage points). That’s a small drop from train to holdout. The model predicts new cases almost as well as it fit the training data, so the shrinkage looks totally acceptable.
+
+
+
+
+#### Part 8. Find a “fancy model”: #### 
+Again using AmesTrain??.csv, where ?? corresponds to your new group number in homework #5, to build a regression model to predict Price.
+
+Step One: Removing "Order" predictor variable like we did in Homework 3.
+```{r}
+grp20data
+newgrp20data <- select(grp20data, -Order)
+newgrp20data
+```
+Step Two: Selecting Basic Model Through Backward Elimination and Forward Selection
+
+Model Selection Method #1: Backward Elimination
+```{r}
+fullmodelgrp20 <- lm(Price~., data = newgrp20data)
+MSEgrp20 <- (summary(fullmodelgrp20)$sigma)^2
+backward_model_grp_20 <- step(fullmodelgrp20, scale=MSEgrp20)
+```
+Testing R^2 of backward model
+```{r}
+grp20bckwd <- lm(Price ~ LotFrontage + LotArea + LotConfig + Quality + Condition + 
+    YearBuilt + ExteriorQ + ExteriorC + BasementHt + BasementFinSF + 
+    BasementSF + GroundSF + Bedroom + KitchenQ + TotalRooms + 
+    Fireplaces + GarageSF, data = newgrp20data)
+
+summary(grp20bckwd)
+```
+Model Selection Method #2: Forward Selection
+```{r}
+fullmodelgrp20fwd <- lm(Price~., data = newgrp20data)
+MSEgrp20fwd <- (summary(fullmodelgrp20fwd)$sigma)^2
+nonegrp20 <- lm(Price ~ 1, data = newgrp20data)
+forward_model_grp_20 <- step(nonegrp20, scope = list(upper=fullmodelgrp20fwd, scale = MSEgrp20fwd, direction = "foward"))
+```
+Checking Summary of Forward Model
+```{r}
+fwdmodgrp20 <- lm(Price ~ Quality + GroundSF + BasementHt + BasementFinSF + ExteriorQ + 
+    GarageSF + LotArea + Condition + YearBuilt + Bedroom + KitchenQ + 
+    Fireplaces + BasementSF + LotFrontage + LotConfig + Foundation + 
+    TotalRooms + ExteriorC, data = newgrp20data)
+
+summary(fwdmodgrp20)
+```
+Step Two Conclusion: 
+Both procedures converge to essentially the same fit. Backward selection yields R^2 = 0.898(adj. R^2=0.892) with RSE = 24.89 on 31 df; forward selection yields R^2 = 0.900 (adj. R^2=0.894) with a slightly lower RSE = 24.73 but uses more terms (36 df). The shared strongest signals are consistent, while several added forward-only factors (Foundation, ExteriorC extra levels) contribute little because their coefficients are not significant. Given the nearly identical accuracy, the backward model looks better for interpretability. The extra complexity doesn’t add much.
+
+Step Three: Analyze Residuals 
+```{r}
+plot(grp20bckwd$residuals ~ grp20bckwd$fitted.values)
+abline(a=0, b=0)
+
+hist(grp20bckwd$residuals, breaks = 20)
+
+qqnorm(grp20bckwd$residuals)
+qqline(grp20bckwd$residuals)
+```
+Step Three Conclusion: The residuals are centered near zero and roughly bell-shaped, but the QQ plot shows clear heavy tails, especially on the upper side, so a few houses are under-predicted by a lot. The index plot shows variance is mostly stable with a handful of larger residuals near the ends, suggesting mild heteroskedasticity and outliers rather than a global pattern. Overall, the linear model assumptions are reasonably met in the center but depart in the tails. Practically, we can keep this basic model but we should check influence for the large-residual points, and consider gentle transformations or interactions. Given the holdout fit matches training closely, these issues are minor but worth noting.
+
+Step Four: Perform Transformation on Price (due to curved residuals vs fitted values plot)
+```{r}
+grp20bckwdimp1 <- lm(log(Price) ~ LotFrontage + LotArea + LotConfig + Quality + Condition + 
+    YearBuilt + ExteriorQ + ExteriorC + BasementHt + BasementFinSF + 
+    BasementSF + GroundSF + Bedroom + KitchenQ + TotalRooms + 
+    Fireplaces + GarageSF, data = newgrp20data)
+
+summary(grp20bckwdimp1)
+```
+Step Four Conclusion: Modeling log(Price) instead of Price meaningfully cleans up the fit while preserving the same core signals. The transformed model achieves R^2=0.9008 (adj. R^2=0.8954) with a residual SE of 0.125 on the log scale, slightly improving on the basic Price-scale model and yielding tighter, more symmetric residuals. These are consistent with variance stabilization from the log transform. Key drivers remain Quality, Condition, YearBuilt, and size measures, with effects now interpretable multiplicatively: for example, a 100 sq-ft increase in ground living area corresponds to roughly a 2.7% higher price, and ten additional years in YearBuilt corresponds to about 3.2% higher price, holding other factors fixed. Signs are sensible, and most categorical contrasts behave as expected. Overall, the log transformation modestly improves explanatory power and produces better-behaved errors, so we adopt this as the “better” model.
+
+Step Five: Plot Predictor Residuals to Determine Further Transformations
+```{r}
+plot(newgrp20data$LotFrontage, resid(grp20bckwdimp1))
+plot(newgrp20data$LotArea, resid(grp20bckwdimp1)) #try log transformation
+plot(newgrp20data$Quality, resid(grp20bckwdimp1))
+plot(newgrp20data$Condition, resid(grp20bckwdimp1))
+plot(newgrp20data$YearBuilt, resid(grp20bckwdimp1))
+plot(newgrp20data$BasementFinSF, resid(grp20bckwdimp1))
+plot(newgrp20data$BasementSF, resid(grp20bckwdimp1))
+plot(newgrp20data$GroundSF, resid(grp20bckwdimp1)) #try log transformation
+plot(newgrp20data$Bedroom, resid(grp20bckwdimp1))
+plot(newgrp20data$TotalRooms, resid(grp20bckwdimp1))
+plot(newgrp20data$Fireplaces, resid(grp20bckwdimp1))
+plot(newgrp20data$GarageSF, resid(grp20bckwdimp1))
+
+```
+
+```{r}
+grp20mod2 <- lm(log(Price) ~ LotFrontage + log(LotArea) + LotConfig + Quality + Condition + 
+    YearBuilt + ExteriorQ + ExteriorC + BasementHt + BasementFinSF + 
+    BasementSF + log(GroundSF) + Bedroom + KitchenQ + TotalRooms + 
+    Fireplaces + GarageSF, data = newgrp20data)
+
+summary(grp20mod2)
+```
+
+```{r}
+plot(grp20mod2$residuals ~ grp20mod2$fitted.values)
+abline(a=0, b=0)
+
+hist(grp20mod2$residuals, breaks = 20)
+
+qqnorm(grp20mod2$residuals)
+qqline(grp20mod2$residuals)
+```
+
+```{r}
+n <- nobs(grp20mod2)
+levlowergrp20 <- 2 * (2/n)
+levuppergrp20 <- 3 * (2/n)
+
+standresidgrp20 <- rstandard(grp20mod2) 
+studresidgrp20 <- rstudent(grp20mod2)
+levgrp20 <- hatvalues(grp20mod2)
+
+standardgrp20 <- standresidgrp20[abs(standresidgrp20) >= 2]
+studentizedgrp20 <- studresidgrp20[abs(studresidgrp20) >= 2]
+
+levlowerresultsgrp20 <- levgrp20[levgrp20 >= levlowergrp20 & levgrp20 < levuppergrp20]
+levupperresultsgrp20 <- levgrp20[levgrp20 >= levuppergrp20]
+
+inorderstandgrp20 <- sort(standardgrp20, decreasing = TRUE)
+inorderstudgrp20 <- sort(studentizedgrp20, decreasing = TRUE)
+inorderlowergrp20 <- sort(levlowerresultsgrp20, decreasing = TRUE)
+inorderuppergrp20 <- sort(levupperresultsgrp20, decreasing = TRUE)
+
+top10levlowgrp20 <- head(inorderlowergrp20, 10)
+top10levupgrp20 <- head(inorderuppergrp20, 10)
+
+cooksgrp20 <- cooks.distance(grp20mod2)
+top10cooksgrp20 <- head(sort(cooksgrp20, decreasing = TRUE), 10)
+
+head(inorderstandgrp20, 10)
+head(inorderstudgrp20, 10)
+sort(top10levlowgrp20 - levlowergrp20, decreasing = TRUE)
+sort(top10levupgrp20 - levuppergrp20, decreasing = TRUE)
+levlowergrp20
+levuppergrp20
+top10cooksgrp20
+```
+The residuals vs. fitted plot is centered around 0 with roughly constant spread(no strong funnel) so variance looks reasonably stable after the log transforms. The histogram is close to bell-shaped but shows a slight left tail (a few large negative residuals), which matches the QQ plot: points track the line in the middle ~80% with heavier tails at both ends, especially the lower tail. By predictors, Fireplaces (discrete 0–3) shows bands centered near 0, with the rare “3” category a bit noisy but no systematic shift. GarageSF shows a mild positive trend and slightly larger scatter for very large garages. This is consistent with either weak nonlinearity or a few influential big-garage homes. Overall, these plots say the transformed model is behaving well, with only a handful of outlier cases.
+
+#### Part 9: Cross-validation for your “fancy” model ####
+    
+Redo the cross-validation analysis with your test data for your new fancy model. Use AmesTest??.csv, where ?? corresponds to your new group number for homework #5. Discuss how the various measures (mean of residuals, std. dev of residuals, shape of the distributions of residuals, cross-validation correlation, and shrinkage) compare to the results you had for your basic model.  Don’t worry about looking for poorly predicted cases this time. If you transformed the response variable, consider how to take this into account for your residual analysis. In order to compare residuals they should have the same units!
+
+```{r}
+# Predictions
+pred_log <- predict(grp20mod2, newdata = newgrp20data)   
+res_log <- log(newgrp20data$Price) - pred_log  
+
+mean(res_log) 
+sd(res_log)   
+
+#Calculating Top 5 Residuals
+top5_indices_log <- order(abs(res_log), decreasing = TRUE)[1:5]
+top5_indices_log
+newgrp20data[top5_indices_log,]
+
+# Testing Normality 
+hist(res_log, breaks = 20)
+qqnorm(res_log)
+qqline(res_log)
+
+#Cross Validation
+pred_log_test <- predict(grp20mod2, newdata = testgrp20data) 
+
+cvcgrp20 <- cor(log(testgrp20data$Price), pred_log_test)
+cvc_Rsqgrp20 <- cvcgrp20^2
+cvc_Rsqgrp20 
+
+#Shrinkage
+summgrp20 <- summary(grp20mod2)
+originalRsq20 <- summgrp20$r.squared
+shrinkagegrp20 <- originalRsq20 - cvc_Rsqgrp20
+shrinkagegrp20
+
+```
+
+The mean of the residuals is 1.011506e-15, which is great; the model's predictions on average are unbiased and it does not over or under predict the log(price). The standard deviation of the residuals is 0.115, which is relatively small meaning that most predictions are close to the mean, which means the predictions are consistent. The distribution of the residuals is roughly symmetric and centered at 0, but it does appear that there are more extreme residuals below -0.4 than above 0.4. The Q-Q plot also indicates normality, but also some more extreme deviations at theoretical quantities below -2.5. Our cross validation correlation of 0.936 so the cross validation r^2 is 0.876, meaning that the model explains about 87.6 percent of the variation in log(Price). For our shrinkage we get 0.115, which may suggest a slight overfitting, but still reasonable and no need for concern. Since the response variable was log-transformed, the residuals represent a difference in predicted and observed log(Price). This should be kept in mind when comparing to the untransformed model and their residuals, as the residuals are more normaly distributed on the transformed model.
+
+#### Part 10. Final Model ####  
+
+Again, you may choose to make some additional adjustments to your model after considering the final residual analysis. If you do so, please explain what (and why) you did and provide the summary() for your new final model.
+    
+Suppose that you are interested in a house in Ames that has the characteristics listed below. Construct a 95% confidence interval for the mean price of such houses.
+
+A 2 story 11 room home, built in 1987 and remodeled in 1999 on a 21540 sq. ft. lot with 328 feet of road frontage. Overall quality is good (7) and condition is average (5). The quality and condition of the exterior are both good (Gd) and it has a poured concrete foundation. There is an 757 sq. foot basement that has excellent height, but is completely unfinished and has no bath facilities. Heating comes from a gas air furnace that is in excellent condition and there is central air conditioning. The house has 2432 sq. ft. of living space above ground, 1485 on the first floor and 947 on the second, with 4 bedrooms, 2 full and one half baths, and 1 fireplace. The 2 car, built-in garage has 588 sq. ft. of space and is average (TA) for both quality and construction. The only porches or decks is a 205 sq. ft. open porch in the front. 
+
+There are no changes from our final model.
+
+```{r}
+summary(grp20mod2)
+```
+
+```{r}
+house1 <- data.frame(
+  LotFrontage = 328,
+  LotArea = 21540,
+  LotConfig = "Inside",
+  Quality = 7,
+  Condition = 5,
+  YearBuilt = 1987,
+  ExteriorQ = "Gd",
+  ExteriorC = "Gd",
+  BasementHt = "Ex",         
+  BasementFinSF = 0,         
+  BasementSF = 757,
+  Bedroom = 4,
+  KitchenQ = "Gd",       
+  TotalRooms = 11,
+  Fireplaces = 1,
+  GarageSF = 588,
+  GroundSF = 2432 + 1485 + 947
+)
+
+house1pred <- predict(grp20mod2, newdata = house1, interval = "confidence", level = 0.95)
+
+house1_dollars <- exp(house1pred)
+house1_dollars
+```
